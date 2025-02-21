@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"log"
 
 	"github.com/gorilla/websocket"
@@ -16,24 +17,51 @@ type Client struct {
 }
 
 func (c *Client) readPump(s *Server) {
-	for client := range s.clients {
-		_, message, err := client.conn.ReadMessage()
+	defer func() {
+		s.unregister <- c
+		c.conn.Close()
+	}()
+
+	for {
+		// read message from current client connection
+		_, message, err := c.conn.ReadMessage()
 		if err != nil {
-			log.Printf("error reading message: %v", err)
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				log.Printf("error reading message: %v", err)
+			}
 			return
 		}
-		log.Printf("message received: %s", message)
+
+		// Parse message and broadcast
+		var msg Message
+		if err := json.Unmarshal(message, &msg); err != nil {
+			log.Printf("error marshaling message: %v", err)
+			continue
+		}
+
+		s.broadcast <- msg
 	}
 }
 
-func (c *Client) writePump(s *Server) {
-	for client := range s.clients {
-		for elem := range client.send {
-			err := c.conn.WriteMessage(websocket.TextMessage, []byte(elem.Content))
-			if err != nil {
-				log.Printf("error writing message: %v", err)
-				return
-			}
+func (c *Client) writePump() {
+	defer func() {
+		c.conn.Close()
+	}()
+
+	for {
+		// read from send channel
+		message, ok := <-c.send
+		if !ok {
+			// channel is closed
+			c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			return
+		}
+
+		// write message to the current client connection
+		err := c.conn.WriteJSON(message)
+		if err != nil {
+			log.Printf("error writing message: %v", err)
+			return
 		}
 	}
 }
