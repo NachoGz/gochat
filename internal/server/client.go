@@ -17,6 +17,7 @@ type Client struct {
 }
 
 func (c *Client) readPump(s *Server) {
+	// Clean-up function
 	defer func() {
 		s.unregister <- c
 		c.conn.Close()
@@ -44,6 +45,7 @@ func (c *Client) readPump(s *Server) {
 }
 
 func (c *Client) writePump() {
+	// Clean-up function
 	defer func() {
 		c.conn.Close()
 	}()
