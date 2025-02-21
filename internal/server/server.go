@@ -1,9 +1,11 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
@@ -72,13 +74,29 @@ func (s *Server) Start() {
 
 // handle ws connections
 func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
-	var upgrader = websocket.Upgrader{}
+	var upgrader = websocket.Upgrader{
+		// Resolve cross-domain problems
+		CheckOrigin: func(r *http.Request) bool {
+			// For development purposes, i accept all origins
+			return true
+			/*
+				origins := []string{"http://127.0.0.1:5173", "http://localhost:5173", "http://127.0.0.1:8080", "http://localhost:8080"}
+				origin := r.Header.Get("origin")
+				for _, allowOrigin := range origins {
+					if origin == allowOrigin {
+						return true
+					}
+				}
+				return false
+			*/
+		},
+	}
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("Websocket upgrade failed: %v", err)
 		return
 	}
-	defer conn.Close()
 
 	client := &Client{
 		conn:     conn,
@@ -88,7 +106,15 @@ func (s *Server) HandleWS(w http.ResponseWriter, r *http.Request) {
 
 	s.register <- client
 
+	// Announce new user
+	s.broadcast <- Message{
+		Type:     "user_joined",
+		Content:  fmt.Sprintf("%s joined the chat", client.username),
+		Username: "System",
+		Time:     time.Now().Format(time.RFC3339),
+	}
+
 	// Start goroutins for reading and writing messages
-	go client.writePump(s)
+	go client.writePump()
 	go client.readPump(s)
 }
